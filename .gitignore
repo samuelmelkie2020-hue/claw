@@ -1,0 +1,21 @@
+# Jarvis local configuration (contains your API key — never commit)
+jarvis_config.json
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and captures
+*.log
+screenshots/

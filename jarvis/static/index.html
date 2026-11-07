@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claw — Your Jarvis</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦞</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <!-- ================= LEFT: the Jarvis orb ================= -->
+    <aside class="sidebar">
+      <header class="brand">
+        <div class="brand-logo">🦞</div>
+        <div>
+          <h1 id="assistantName">Jarvis</h1>
+          <p class="brand-sub">Claw · PC assistant</p>
+        </div>
+        <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
+      </header>
+
+      <div class="orb-wrap">
+        <canvas id="orb" width="320" height="320"></canvas>
+        <div class="orb-label" id="orbLabel">Standing by</div>
+      </div>
+
+      <section class="screen-panel">
+        <div class="panel-head">
+          <span>🖥 Live screen</span>
+          <button id="refreshScreen" class="tiny-btn" title="Refresh screenshot">⟳</button>
+        </div>
+        <div class="screen-frame">
+          <img id="screenImg" alt="Screen capture" src="/api/screenshot" />
+          <div class="screen-off" id="screenOff">No capture yet</div>
+        </div>
+      </section>
+
+      <section class="quick">
+        <p class="panel-title">Quick actions</p>
+        <div class="chips">
+          <button class="chip" data-say="What's on my screen?">👁 What's on my screen?</button>
+          <button class="chip" data-say="How is my PC doing?">🖥 System status</button>
+          <button class="chip" data-say="List my downloads">📂 List downloads</button>
+          <button class="chip" data-say="What can you do?">✨ Capabilities</button>
+        </div>
+      </section>
+
+      <footer class="sidebar-foot">
+        <label class="toggle">
+          <input type="checkbox" id="safeMode" checked />
+          <span>🛡 Ask before acting</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="voiceReplies" checked />
+          <span>🔊 Speak replies</span>
+        </label>
+      </footer>
+    </aside>
+
+    <!-- ================= RIGHT: the conversation ================= -->
+    <main class="chat">
+      <div class="chat-log" id="chatLog">
+        <div class="msg assistant">
+          <div class="bubble">
+            <p>At your service. I'm <b>Jarvis</b> — I can see your screen and control this PC.</p>
+            <p>Ask me anything, press <b>🎙</b> to talk, or try a quick action on the left.</p>
+          </div>
+        </div>
+      </div>
+
+      <footer class="composer">
+        <div class="input-row">
+          <button id="micBtn" class="mic-btn" title="Talk to Jarvis (voice input)">🎙</button>
+          <textarea id="userInput" rows="1" placeholder="Ask Jarvis to do something…"></textarea>
+          <button id="sendBtn" class="send-btn" title="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg>
+          </button>
+        </div>
+        <p class="composer-hint" id="composerHint">Enter to send · Shift+Enter for a new line · Voice works in Chrome/Edge</p>
+      </footer>
+    </main>
+  </div>
+
+  <!-- ================= SETTINGS MODAL ================= -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>⚙️ Settings</h2>
+        <button class="icon-btn" id="closeSettings">✕</button>
+      </div>
+
+      <label class="field">
+        <span>Assistant name</span>
+        <input id="setName" type="text" placeholder="Jarvis" />
+      </label>
+
+      <div class="modal-section">AI model — any OpenAI-compatible provider</div>
+
+      <label class="field">
+        <span>API base URL</span>
+        <input id="setBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
+        <small>
+          OpenAI: <code>https://api.openai.com/v1</code> ·
+          Gemini: <code>https://generativelanguage.googleapis.com/v1beta/openai/</code> ·
+          Groq: <code>https://api.groq.com/openai/v1</code> ·
+          OpenRouter: <code>https://openrouter.ai/api/v1</code> ·
+          Ollama: <code>http://localhost:11434/v1</code>
+        </small>
+      </label>
+
+      <label class="field">
+        <span>API key</span>
+        <input id="setApiKey" type="password" placeholder="sk-… (leave empty for demo mode / Ollama)" />
+      </label>
+
+      <label class="field">
+        <span>Model</span>
+        <input id="setModel" type="text" placeholder="gpt-4o-mini" />
+        <small>Use a vision model (gpt-4o, gemini-2.0-flash, llama3.2-vision…) so Jarvis can see your screen.</small>
+      </label>
+
+      <div class="modal-actions">
+        <button class="btn ghost" id="cancelSettings">Cancel</button>
+        <button class="btn primary" id="saveSettings">Save settings</button>
+      </div>
+      <p class="modal-note">Keys are stored only on this machine, in <code>jarvis_config.json</code>.</p>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
