@@ -178,6 +178,7 @@ Without an API key, a built-in **demo brain** handles simple intents so you can 
 | Problem | Fix |
 |---|---|
 | *"Could not open requirements file"* | You are not in the `claw` folder — run `cd claw` first, or use **start.bat** (it handles everything). |
+| *"TLS/SSL connection has been closed"* / can't reach the AI model | Your network is blocking the AI provider (not your key). Press **🔌 Test connection** in Settings; try another Provider, a VPN, or Ollama (local). If you're chatting inside the Arena **preview**: that sandbox is always blocked from AI sites — run Jarvis on your own PC. |
 | "Screen capture unavailable" | Run it on a machine with a real display; on macOS grant Screen Recording permission. |
 | Mic button says unsupported | Voice input needs Chrome or Edge (Web Speech API). |
 | "I couldn't reach the AI model" | Check base URL / key / model in ⚙️ Settings. Ollama users: make sure `ollama serve` is running and you `ollama pull llama3.2-vision`. |

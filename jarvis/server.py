@@ -42,6 +42,10 @@ class SettingsRequest(BaseModel):
     settings: dict
 
 
+class TestRequest(BaseModel):
+    settings: dict | None = None
+
+
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -68,6 +72,52 @@ def get_settings() -> dict:
 @app.post("/api/settings")
 def post_settings(body: SettingsRequest) -> dict:
     return save_config(body.settings or {})
+
+
+@app.post("/api/test-connection")
+def test_connection(body: TestRequest) -> JSONResponse:
+    """Check network + API key + model in one shot with a 1-token chat call."""
+    import httpx
+
+    cfg = load_config()
+    if body.settings:
+        merged = json.loads(json.dumps(cfg))
+        merged.update({k: v for k, v in body.settings.items() if k != "llm"})
+        if isinstance(body.settings.get("llm"), dict):
+            merged["llm"].update(body.settings["llm"])
+        cfg = merged
+    llm = cfg.get("llm", {})
+    base = (llm.get("base_url") or "").rstrip("/")
+    key = llm.get("api_key") or ""
+    model = llm.get("model") or ""
+    if not base:
+        return JSONResponse({"ok": False, "detail": "No API base URL set — pick a provider first."})
+    host = base.split("//")[-1].split("/")[0]
+
+    try:
+        r = httpx.post(
+            base + "/chat/completions",
+            headers={"Authorization": f"Bearer {key}"} if key else {},
+            json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+            timeout=30,
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "detail": (
+            f"❌ Could not reach {host} at all: {str(exc)[:160]}\n"
+            "This is a NETWORK block (firewall / ISP / antivirus), not your key. "
+            "If you are using the Arena chat preview: it is always blocked from AI sites — "
+            "run Jarvis on your own PC instead. Otherwise try another provider, a VPN, or Ollama (local)."
+        )})
+
+    if r.status_code == 200:
+        return JSONResponse({"ok": True, "detail": f"✅ Connected to {host} — network, key and model all work. Jarvis is ready!"})
+    if r.status_code in (401, 403):
+        return JSONResponse({"ok": False, "detail": f"🌐 Reached {host}, but the API key was rejected (HTTP {r.status_code}). Re-copy your key."})
+    if r.status_code == 402:
+        return JSONResponse({"ok": False, "detail": f"💳 Reached {host}, but the account is out of credit (HTTP 402)."})
+    if r.status_code == 429:
+        return JSONResponse({"ok": False, "detail": f"⏳ Reached {host} — everything works, but rate-limited right now (HTTP 429). Try again in a moment."})
+    return JSONResponse({"ok": False, "detail": f"⚠ Reached {host} but got HTTP {r.status_code}: {r.text[:160]} — check the base URL and model name."})
 
 
 @app.get("/api/screenshot")

@@ -137,11 +137,7 @@ def run_agent_turn(
         try:
             msg = client.complete(messages, TOOLS)
         except Exception as exc:
-            return (
-                f"I couldn't reach the AI model: {exc}. "
-                "Open Settings and check the API base URL, key and model — "
-                "or leave the key empty to use my built-in demo brain."
-            )
+            return _friendly_model_error(exc, llm)
 
         if not msg.get("tool_calls"):
             text = msg.get("content") or "(no response)"
@@ -192,6 +188,47 @@ def run_agent_turn(
     text = "I ran into a loop while working on that — could you rephrase the request?"
     emit("message", {"text": text})
     return text
+
+
+def _friendly_model_error(exc: Exception, llm_cfg: dict) -> str:
+    """Turn raw network/API errors into actionable, human guidance."""
+    base = (llm_cfg.get("base_url") or "").strip()
+    host = base.split("//")[-1].split("/")[0] if base else "the AI provider"
+    msg = str(exc)
+    low = msg.lower()
+
+    m = re.search(r"LLM error (\d{3})", msg)
+    if m:
+        code = int(m.group(1))
+        if code in (401, 403):
+            return (
+                f"⚠ I reached {host}, but the **API key was rejected** (HTTP {code}). "
+                "Open ⚙️ Settings and re-copy your key, then press **🔌 Test connection**."
+            )
+        if code == 402:
+            return f"⚠ Your {host} account is out of credit (HTTP 402). Top it up and try again."
+        if code == 429:
+            return f"⚠ {host} is rate-limiting us (HTTP 429). Good news: your setup works — just wait a moment and retry."
+        if code == 404:
+            return (
+                f"⚠ {host} didn't recognize the model or URL (HTTP 404). "
+                "Check the **model name** and **API base URL** in ⚙️ Settings."
+            )
+        return f"⚠ {host} returned an error: {msg[:300]}"
+
+    if any(k in low for k in ("ssl", "tls", "eof", "connection", "timed out", "timeout", "resolve", "refused", "reset", "proxy", "network")):
+        return (
+            f"⚠ **Can't reach {host} at all** — something on the network is blocking the connection. "
+            "Your API key is fine; this is a network problem.\n\n"
+            "Fixes to try:\n"
+            "1. Press **🔌 Test connection** in ⚙️ Settings to confirm.\n"
+            "2. Try a different **Provider** in Settings — some networks block only some sites "
+            "(if you're using the chat preview inside Arena instead of the app on your own PC, "
+            "that preview is *always* blocked from AI sites — run Jarvis on your PC instead).\n"
+            "3. Use a VPN if your ISP blocks AI sites.\n"
+            "4. Or pick **Ollama (local)** — a free AI that runs offline, no internet needed."
+        )
+    return f"⚠ I couldn't reach the AI model: {msg[:300]}"
 
 
 def _describe_action(tool_name: str, args: dict) -> str:
