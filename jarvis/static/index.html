@@ -98,6 +98,19 @@
       <div class="modal-section">AI model — any OpenAI-compatible provider</div>
 
       <label class="field">
+        <span>Provider</span>
+        <select id="setProvider">
+          <option value="openrouter">OpenRouter (your key works here)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="ollama">Ollama (local, free)</option>
+          <option value="custom">Custom / other</option>
+        </select>
+        <small>Picking a provider fills in the URL and a good default model automatically.</small>
+      </label>
+
+      <label class="field">
         <span>API base URL</span>
         <input id="setBaseUrl" type="text" placeholder="https://api.openai.com/v1" />
         <small>

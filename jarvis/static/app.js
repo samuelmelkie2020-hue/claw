@@ -23,6 +23,7 @@ const closeSettings = document.getElementById("closeSettings");
 const cancelSettings = document.getElementById("cancelSettings");
 const saveSettings = document.getElementById("saveSettings");
 const setName = document.getElementById("setName");
+const setProvider = document.getElementById("setProvider");
 const setBaseUrl = document.getElementById("setBaseUrl");
 const setApiKey = document.getElementById("setApiKey");
 const setModel = document.getElementById("setModel");
@@ -389,6 +390,31 @@ refreshScreen.addEventListener("click", refreshScreenImage);
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
+const PROVIDERS = {
+  openrouter: { base: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
+  openai:     { base: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  gemini:     { base: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-2.0-flash" },
+  groq:       { base: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  ollama:     { base: "http://localhost:11434/v1", model: "llama3.2-vision" },
+  custom:     { base: "", model: "" },
+};
+const KNOWN_MODELS = Object.values(PROVIDERS).map((p) => p.model).filter(Boolean);
+
+function inferProvider(baseUrl) {
+  const b = (baseUrl || "").toLowerCase();
+  for (const [id, p] of Object.entries(PROVIDERS)) {
+    if (p.base && b.startsWith(p.base.toLowerCase())) return id;
+  }
+  return "custom";
+}
+
+setProvider.addEventListener("change", () => {
+  const p = PROVIDERS[setProvider.value];
+  if (!p) return;
+  if (setProvider.value !== "custom") setBaseUrl.value = p.base;
+  if (!setModel.value.trim() || KNOWN_MODELS.includes(setModel.value.trim())) setModel.value = p.model;
+});
+
 async function loadSettings() {
   try {
     const res = await fetch("/api/settings");
@@ -399,6 +425,7 @@ async function loadSettings() {
     assistantNameEl.textContent = cfg.assistant_name || "Jarvis";
     setName.value = cfg.assistant_name || "";
     setBaseUrl.value = cfg.llm?.base_url || "";
+    setProvider.value = inferProvider(cfg.llm?.base_url);
     setApiKey.value = cfg.llm?.api_key || "";
     setModel.value = cfg.llm?.model || "";
     document.querySelector(".brand-sub").textContent =

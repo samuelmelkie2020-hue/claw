@@ -293,12 +293,14 @@ textarea#userInput::placeholder { color: rgba(138, 163, 192, 0.65); }
 }
 .field { display: block; margin-bottom: 13px; }
 .field > span { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; }
-.field input {
+.field input, .field select {
   width: 100%; background: rgba(2, 6, 23, 0.6); border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px; padding: 11px 13px; color: var(--text); font: inherit; font-size: 0.92rem;
   outline: none;
 }
-.field input:focus { border-color: rgba(34, 211, 238, 0.55); }
+.field select { cursor: pointer; }
+.field select option { background: #0b1424; color: var(--text); }
+.field input:focus, .field select:focus { border-color: rgba(34, 211, 238, 0.55); }
 .field small { display: block; color: rgba(138, 163, 192, 0.75); font-size: 0.72rem; margin-top: 6px; line-height: 1.55; }
 .field small code, .modal-note code {
   background: rgba(2, 6, 23, 0.7); padding: 1px 5px; border-radius: 5px; font-size: 0.72rem;
