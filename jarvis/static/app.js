@@ -478,6 +478,37 @@ saveSettings.addEventListener("click", async () => {
   hideSettings();
 });
 
+const testConnBtn = document.getElementById("testConnBtn");
+const testResult = document.getElementById("testResult");
+testConnBtn.addEventListener("click", async () => {
+  testConnBtn.disabled = true;
+  testResult.className = "test-result bad";
+  testResult.textContent = "🔌 Testing connection…";
+  try {
+    const res = await fetch("/api/test-connection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settings: {
+          llm: {
+            base_url: setBaseUrl.value.trim(),
+            api_key: setApiKey.value.trim(),
+            model: setModel.value.trim(),
+          },
+        },
+      }),
+    });
+    const data = await res.json();
+    testResult.textContent = data.detail || "(no response)";
+    testResult.className = data.ok ? "test-result ok" : "test-result bad";
+  } catch (err) {
+    testResult.textContent = "Could not run the test: " + (err.message || err);
+    testResult.className = "test-result bad";
+  } finally {
+    testConnBtn.disabled = false;
+  }
+});
+
 safeModeEl.addEventListener("change", () => {
   state.settings.safe_mode = safeModeEl.checked;
   fetch("/api/settings", {

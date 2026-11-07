@@ -307,6 +307,12 @@ textarea#userInput::placeholder { color: rgba(138, 163, 192, 0.65); }
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .modal-note { color: rgba(138, 163, 192, 0.65); font-size: 0.74rem; margin-top: 12px; }
+.test-result {
+  margin-top: 12px; font-size: 0.82rem; line-height: 1.55; white-space: pre-wrap;
+  border-radius: 10px; padding: 10px 12px; display: none;
+}
+.test-result.ok { display: block; background: rgba(52, 211, 153, 0.12); color: #a7f3d0; border: 1px solid rgba(52, 211, 153, 0.35); }
+.test-result.bad { display: block; background: rgba(251, 191, 36, 0.1); color: #fde68a; border: 1px solid rgba(251, 191, 36, 0.35); }
 
 /* ================= Scrollbars ================= */
 
