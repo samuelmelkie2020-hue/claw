@@ -25,7 +25,18 @@ Ask it in plain English (or by voice) and it will look at your screen, run comma
 
 ## 🚀 Quick start
 
-Requires **Python 3.9+**.
+Requires **Python 3.9+** (you already have it — otherwise `pip` would not have run).
+
+### ✨ The easy way — one click
+
+1. Open **https://github.com/samuelmelkie2020-hue/claw** in your browser.
+2. Click the green **< > Code** button → **Download ZIP**.
+3. **Unzip** the file (right-click → Extract All).
+4. Open the extracted folder and **double-click `start.bat`** (Windows) — or on Mac/Linux open Terminal inside the folder and run `bash start.sh`.
+
+That's it! The script installs everything and opens Jarvis in your browser at **http://localhost:8000**. 🎉
+
+### 🧑‍💻 The classic way — terminal
 
 ```bash
 # 1. Get the code onto your PC
@@ -43,7 +54,9 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Open **http://localhost:8000** — Jarvis is awake. 🎉
+Open **http://localhost:8000** — Jarvis is awake.
+
+> 💡 If you ever see *"Could not open requirements file"* — you are not inside the `claw` folder. Type `cd claw` first (or just use the one-click way above).
 
 It works immediately with the built-in **demo brain** (try *"what's on my screen?"*, *"run dir"*, *"open notepad"*).
 
@@ -164,6 +177,7 @@ Without an API key, a built-in **demo brain** handles simple intents so you can 
 
 | Problem | Fix |
 |---|---|
+| *"Could not open requirements file"* | You are not in the `claw` folder — run `cd claw` first, or use **start.bat** (it handles everything). |
 | "Screen capture unavailable" | Run it on a machine with a real display; on macOS grant Screen Recording permission. |
 | Mic button says unsupported | Voice input needs Chrome or Edge (Web Speech API). |
 | "I couldn't reach the AI model" | Check base URL / key / model in ⚙️ Settings. Ollama users: make sure `ollama serve` is running and you `ollama pull llama3.2-vision`. |
