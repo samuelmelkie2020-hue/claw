@@ -8,12 +8,20 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦞</text></svg>" />
 </head>
 <body>
+  <!-- animated background -->
+  <div class="bg-layer" aria-hidden="true">
+    <div class="aurora a1"></div>
+    <div class="aurora a2"></div>
+    <div class="aurora a3"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
   <div class="app">
     <!-- ================= LEFT: the Jarvis orb ================= -->
     <aside class="sidebar">
       <header class="brand">
         <div class="brand-logo">🦞</div>
-        <div>
+        <div class="brand-text">
           <h1 id="assistantName">Jarvis</h1>
           <p class="brand-sub">Claw · PC assistant</p>
         </div>
@@ -25,24 +33,27 @@
         <div class="orb-label" id="orbLabel">Standing by</div>
       </div>
 
-      <section class="screen-panel">
+      <section class="panel screen-panel">
         <div class="panel-head">
-          <span>🖥 Live screen</span>
-          <button id="refreshScreen" class="tiny-btn" title="Refresh screenshot">⟳</button>
+          <span class="panel-title">🖥 Live screen</span>
+          <div class="panel-tools">
+            <span class="shot-time" id="shotTime"></span>
+            <button id="refreshScreen" class="tiny-btn" title="Refresh screenshot">⟳</button>
+          </div>
         </div>
-        <div class="screen-frame">
+        <div class="screen-frame" id="screenFrame">
           <img id="screenImg" alt="Screen capture" src="/api/screenshot" />
-          <div class="screen-off" id="screenOff">No capture yet</div>
+          <div class="screen-off" id="screenOff"><div class="spin-ring"></div>Waiting for capture…</div>
         </div>
       </section>
 
-      <section class="quick">
-        <p class="panel-title">Quick actions</p>
+      <section class="panel quick">
+        <div class="panel-head"><span class="panel-title">⚡ Quick actions</span></div>
         <div class="chips">
-          <button class="chip" data-say="What's on my screen?">👁 What's on my screen?</button>
-          <button class="chip" data-say="How is my PC doing?">🖥 System status</button>
-          <button class="chip" data-say="List my downloads">📂 List downloads</button>
-          <button class="chip" data-say="What can you do?">✨ Capabilities</button>
+          <button class="chip" data-say="What's on my screen?"><span>👁</span>What's on my screen?</button>
+          <button class="chip" data-say="How is my PC doing?"><span>🖥</span>System status</button>
+          <button class="chip" data-say="List my downloads"><span>📂</span>List downloads</button>
+          <button class="chip" data-say="What can you do?"><span>✨</span>Capabilities</button>
         </div>
       </section>
 
@@ -55,16 +66,32 @@
           <input type="checkbox" id="voiceReplies" checked />
           <span>🔊 Speak replies</span>
         </label>
+        <p class="foot-note">v1.0 · local-first · your key stays on this PC</p>
       </footer>
     </aside>
 
     <!-- ================= RIGHT: the conversation ================= -->
     <main class="chat">
+      <header class="chat-head">
+        <div class="chat-title">
+          <h2>Conversation</h2>
+          <div class="status-line">
+            <span class="status-dot" id="modelDot"></span>
+            <span id="modelStatus">Demo brain</span>
+          </div>
+        </div>
+        <button id="clearChat" class="icon-btn" title="New conversation">🧹</button>
+      </header>
+
       <div class="chat-log" id="chatLog">
-        <div class="msg assistant">
-          <div class="bubble">
-            <p>At your service. I'm <b>Jarvis</b> — I can see your screen and control this PC.</p>
-            <p>Ask me anything, press <b>🎙</b> to talk, or try a quick action on the left.</p>
+        <div class="hero" id="welcomeHero">
+          <div class="hero-orb">🦞</div>
+          <h3>At your service.</h3>
+          <p>I'm <b>Jarvis</b> — I can <b>see your screen</b> and <b>control this PC</b>.
+             Ask me anything, or try a quick action.</p>
+          <div class="hero-tips">
+            <span>Press <kbd>🎙</kbd> to talk</span>
+            <span>Try <kbd>What's on my screen?</kbd></span>
           </div>
         </div>
       </div>
@@ -77,10 +104,13 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg>
           </button>
         </div>
-        <p class="composer-hint" id="composerHint">Enter to send · Shift+Enter for a new line · Voice works in Chrome/Edge</p>
+        <p class="composer-hint" id="composerHint"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · voice works in Chrome/Edge</p>
       </footer>
     </main>
   </div>
+
+  <!-- toast -->
+  <div class="toast" id="toast"></div>
 
   <!-- ================= SETTINGS MODAL ================= -->
   <div class="modal-backdrop hidden" id="settingsModal">
@@ -95,17 +125,17 @@
         <input id="setName" type="text" placeholder="Jarvis" />
       </label>
 
-      <div class="modal-section">AI model — any OpenAI-compatible provider</div>
+      <div class="modal-section">🧠 AI brain — any OpenAI-compatible provider</div>
 
       <label class="field">
         <span>Provider</span>
         <select id="setProvider">
-          <option value="openrouter">OpenRouter (your key works here)</option>
-          <option value="openai">OpenAI</option>
-          <option value="gemini">Google Gemini</option>
-          <option value="groq">Groq</option>
-          <option value="ollama">Ollama (local, free)</option>
-          <option value="custom">Custom / other</option>
+          <option value="openrouter">🌐 OpenRouter</option>
+          <option value="openai">🤖 OpenAI</option>
+          <option value="gemini">✨ Google Gemini</option>
+          <option value="groq">⚡ Groq</option>
+          <option value="ollama">🦙 Ollama (local, free)</option>
+          <option value="custom">🔧 Custom / other</option>
         </select>
         <small>Picking a provider fills in the URL and a good default model automatically.</small>
       </label>
@@ -124,7 +154,10 @@
 
       <label class="field">
         <span>API key</span>
-        <input id="setApiKey" type="password" placeholder="sk-… (leave empty for demo mode / Ollama)" />
+        <div class="key-row">
+          <input id="setApiKey" type="password" placeholder="sk-… (leave empty for demo mode / Ollama)" />
+          <button id="keyToggle" class="tiny-btn" type="button" title="Show / hide key">👁</button>
+        </div>
       </label>
 
       <label class="field">

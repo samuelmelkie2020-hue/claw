@@ -12,10 +12,13 @@ const orbLabel = document.getElementById("orbLabel");
 const screenImg = document.getElementById("screenImg");
 const screenOff = document.getElementById("screenOff");
 const refreshScreen = document.getElementById("refreshScreen");
+const shotTime = document.getElementById("shotTime");
 const safeModeEl = document.getElementById("safeMode");
 const voiceRepliesEl = document.getElementById("voiceReplies");
 const assistantNameEl = document.getElementById("assistantName");
 const composerHint = document.getElementById("composerHint");
+const modelDot = document.getElementById("modelDot");
+const modelStatus = document.getElementById("modelStatus");
 
 const settingsModal = document.getElementById("settingsModal");
 const settingsBtn = document.getElementById("settingsBtn");
@@ -27,6 +30,8 @@ const setProvider = document.getElementById("setProvider");
 const setBaseUrl = document.getElementById("setBaseUrl");
 const setApiKey = document.getElementById("setApiKey");
 const setModel = document.getElementById("setModel");
+
+const heroTemplate = (document.getElementById("welcomeHero") || {}).outerHTML || "";
 
 // ---------------------------------------------------------------------------
 // State
@@ -62,6 +67,10 @@ function mdLite(text) {
   return out;
 }
 
+function nowTime() {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function setOrb(mode) {
   state.orb = mode;
   const labels = { idle: "Standing by", listening: "Listening…", thinking: "Thinking…", speaking: "Speaking…" };
@@ -72,15 +81,56 @@ function scrollBottom() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2400);
+}
+
+function updateModelStatus(cfg) {
+  const llm = cfg.llm || {};
+  const hasBrain = (llm.api_key || "").length > 0 || /localhost|127\.0\.0\.1/.test(llm.base_url || "");
+  modelDot.classList.toggle("live", hasBrain);
+  modelStatus.textContent = hasBrain ? `${llm.model || "AI"} connected` : "Demo brain";
+  document.querySelector(".brand-sub").textContent =
+    hasBrain ? `Claw · ${llm.model || "AI"} connected` : "Claw · demo brain";
+}
+
+// ---------------------------------------------------------------------------
+// Chat rendering
+// ---------------------------------------------------------------------------
 function addMessage(role, html) {
+  document.getElementById("welcomeHero")?.remove();
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
   const avatar = role === "user" ? "🧑" : "🦞";
-  wrap.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble">${html}</div>`;
+  wrap.innerHTML = `
+    <div class="avatar">${avatar}</div>
+    <div class="msg-body">
+      <div class="bubble">${html}</div>
+      <div class="msg-meta">
+        <span class="msg-time">${nowTime()}</span>
+        ${role === "assistant" ? '<button class="copy-btn" title="Copy">📋 copy</button>' : ""}
+      </div>
+    </div>`;
   chatLog.appendChild(wrap);
   scrollBottom();
   return wrap.querySelector(".bubble");
 }
+
+// copy assistant replies to the clipboard
+chatLog.addEventListener("click", (e) => {
+  const btn = e.target.closest(".copy-btn");
+  if (!btn) return;
+  const bubble = btn.closest(".msg-body").querySelector(".bubble");
+  try {
+    navigator.clipboard.writeText(bubble.innerText);
+    toast("Copied to clipboard ✓");
+  } catch { /* clipboard may be unavailable */ }
+});
 
 function addStatus(text) {
   const pill = document.createElement("div");
@@ -91,15 +141,27 @@ function addStatus(text) {
   return pill;
 }
 
+const TOOL_ICONS = {
+  see_screen: "👁", run_command: "⌨️", open_app: "🚀", type_text: "✍️",
+  press_keys: "🎛", click: "🖱", system_info: "📊", list_files: "📂",
+  read_file: "📄", write_file: "📝", search_files: "🔎", clipboard: "📋",
+};
+
 function addToolCard(name, args) {
   const card = document.createElement("div");
   card.className = "tool-card";
   const argsStr = JSON.stringify(args || {});
+  const icon = TOOL_ICONS[name] || "🔧";
   card.innerHTML = `
-    <div class="tool-name">🔧 ${esc(name)}</div>
+    <div class="tool-head">
+      <div class="tool-icon">${icon}</div>
+      <div class="tool-name">${esc(name)}</div>
+      <div class="tool-badge"><span class="dot"></span>running</div>
+    </div>
     <div class="tool-args">${esc(argsStr.length > 160 ? argsStr.slice(0, 160) + "…" : argsStr)}</div>
     <details><summary>result</summary><div class="tool-result">running…</div></details>`;
   chatLog.appendChild(card);
+  window._lastToolCard = card;
   scrollBottom();
   return card.querySelector(".tool-result");
 }
@@ -119,7 +181,6 @@ function addApprovalCard(data) {
   scrollBottom();
 
   const [approveBtn, denyBtn] = card.querySelectorAll("button");
-  approveBtn.disabled = denyBtn.disabled = false;
   approveBtn.onclick = async () => {
     approveBtn.disabled = denyBtn.disabled = true;
     approveBtn.textContent = "Running…";
@@ -144,16 +205,24 @@ function addApprovalCard(data) {
   };
   denyBtn.onclick = () => {
     approveBtn.disabled = denyBtn.disabled = true;
-    approveBtn.textContent = "✅ Approve";
     denyBtn.textContent = "Denied";
     addMessage("user", "🚫 Action denied.");
     state.history.push({ role: "user", content: "(system) I denied that action. Don't retry it." });
   };
 }
 
+function markShot() {
+  shotTime.textContent = nowTime();
+  const frame = document.getElementById("screenFrame");
+  frame.classList.remove("flash");
+  void frame.offsetWidth;            // restart the animation
+  frame.classList.add("flash");
+}
+
 function setScreenImage(b64) {
   screenImg.src = `data:image/png;base64,${b64}`;
   screenOff.style.display = "none";
+  markShot();
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +253,7 @@ async function sendMessage(text, opts = {}) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
-        history: state.history.slice(0, -0), // whole history (the server trims)
+        history: state.history,
         settings: {
           assistant_name: state.settings.assistant_name,
           safe_mode: safeModeEl.checked,
@@ -219,19 +288,19 @@ async function sendMessage(text, opts = {}) {
             statusPill.querySelector("span:last-child").textContent = ev.message || "Working…";
             break;
 
-          case "tool_start": {
+          case "tool_start":
             statusPill.remove();
-            const resultEl = addToolCard(ev.name, ev.args);
-            ev._resultEl = resultEl;
-            // keep a rolling reference so tool_result can fill it
-            window._lastToolResultEl = resultEl;
+            addToolCard(ev.name, ev.args);
             break;
-          }
 
           case "tool_result": {
-            if (window._lastToolResultEl) {
-              window._lastToolResultEl.textContent = ev.result || "(no output)";
-              window._lastToolResultEl = null;
+            const card = window._lastToolCard;
+            if (card) {
+              card.querySelector(".tool-result").textContent = ev.result || "(no output)";
+              const badge = card.querySelector(".tool-badge");
+              badge.classList.add(ev.ok === false ? "bad" : "ok");
+              badge.lastChild.textContent = ev.ok === false ? "error" : "done";
+              window._lastToolCard = null;
             }
             break;
           }
@@ -350,7 +419,7 @@ micBtn.addEventListener("click", () => {
   recognition.onend = () => {
     micBtn.classList.remove("listening");
     setOrb("idle");
-    composerHint.textContent = "Enter to send · Shift+Enter for a new line · Voice works in Chrome/Edge";
+    composerHint.innerHTML = "<kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · voice works in Chrome/Edge";
     const t = userInput.value.trim();
     if (t) sendMessage(t);
   };
@@ -370,11 +439,18 @@ userInput.addEventListener("keydown", (e) => {
 });
 userInput.addEventListener("input", () => {
   userInput.style.height = "auto";
-  userInput.style.height = Math.min(userInput.scrollHeight, 160) + "px";
+  userInput.style.height = Math.min(userInput.scrollHeight, 170) + "px";
 });
 
 document.querySelectorAll(".chip").forEach((chip) => {
   chip.addEventListener("click", () => sendMessage(chip.dataset.say));
+});
+
+// new conversation
+document.getElementById("clearChat").addEventListener("click", () => {
+  state.history = [];
+  chatLog.innerHTML = heroTemplate;
+  toast("Fresh conversation started 🧹");
 });
 
 // ---------------------------------------------------------------------------
@@ -382,9 +458,15 @@ document.querySelectorAll(".chip").forEach((chip) => {
 // ---------------------------------------------------------------------------
 function refreshScreenImage() {
   screenImg.src = `/api/screenshot?t=${Date.now()}`;
-  screenImg.onload = () => { screenOff.style.display = "none"; };
+  screenImg.onload = () => {
+    screenOff.style.display = "none";
+    markShot();
+  };
 }
-screenImg.addEventListener("load", () => { screenOff.style.display = "none"; });
+screenImg.addEventListener("load", () => {
+  screenOff.style.display = "none";
+  markShot();
+});
 refreshScreen.addEventListener("click", refreshScreenImage);
 
 // ---------------------------------------------------------------------------
@@ -415,6 +497,13 @@ setProvider.addEventListener("change", () => {
   if (!setModel.value.trim() || KNOWN_MODELS.includes(setModel.value.trim())) setModel.value = p.model;
 });
 
+// show / hide the API key
+document.getElementById("keyToggle").addEventListener("click", () => {
+  const show = setApiKey.type === "password";
+  setApiKey.type = show ? "text" : "password";
+  document.getElementById("keyToggle").textContent = show ? "🙈" : "👁";
+});
+
 async function loadSettings() {
   try {
     const res = await fetch("/api/settings");
@@ -428,8 +517,7 @@ async function loadSettings() {
     setProvider.value = inferProvider(cfg.llm?.base_url);
     setApiKey.value = cfg.llm?.api_key || "";
     setModel.value = cfg.llm?.model || "";
-    document.querySelector(".brand-sub").textContent =
-      (cfg.llm?.api_key || "").length > 0 ? `Claw · ${cfg.llm.model || "AI"} connected` : "Claw · demo brain";
+    updateModelStatus(cfg);
   } catch { /* keep defaults */ }
 }
 
@@ -463,21 +551,21 @@ saveSettings.addEventListener("click", async () => {
     });
     state.settings = await res.json();
     assistantNameEl.textContent = state.settings.assistant_name;
-    document.querySelector(".brand-sub").textContent =
-      (state.settings.llm?.api_key || "").length > 0
-        ? `Claw · ${state.settings.llm.model || "AI"} connected`
-        : "Claw · demo brain";
+    updateModelStatus(state.settings);
+    toast("Settings saved ✓");
     addMessage("assistant", `⚙️ Settings saved. I'm <b>${esc(state.settings.assistant_name)}</b>${
       (state.settings.llm?.api_key || state.settings.llm?.base_url?.includes("localhost"))
         ? ` and I'm thinking with <code>${esc(state.settings.llm.model)}</code>.`
         : " and my demo brain is active — add an API key in Settings to unlock full intelligence."
     }`);
   } catch (err) {
+    toast("Could not save settings");
     addMessage("assistant", `⚠ Could not save settings: ${err.message || err}`);
   }
   hideSettings();
 });
 
+// test the AI connection from the settings fields
 const testConnBtn = document.getElementById("testConnBtn");
 const testResult = document.getElementById("testResult");
 testConnBtn.addEventListener("click", async () => {
@@ -523,10 +611,11 @@ safeModeEl.addEventListener("change", () => {
 // ---------------------------------------------------------------------------
 const canvas = document.getElementById("orb");
 const ctx = canvas.getContext("2d");
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let t = 0;
 
 function drawOrb() {
-  t += 0.016;
+  t += reduceMotion ? 0 : 0.016;
   const w = canvas.width, h = canvas.height;
   const cx = w / 2, cy = h / 2;
   ctx.clearRect(0, 0, w, h);
@@ -536,7 +625,7 @@ function drawOrb() {
   const breathe = 1 + Math.sin(t * 1.4 * speed) * (mode === "idle" ? 0.03 : 0.07);
 
   // outer glow
-  const glow = ctx.createRadialGradient(cx, cy, 20, cx, cy, 150 * breathe);
+  const glow = ctx.createRadialGradient(cx, cy, 20, cx, cy, 152 * breathe);
   const hue = mode === "listening" ? 330 : mode === "thinking" ? 265 : 195;
   glow.addColorStop(0, `hsla(${hue}, 95%, 65%, 0.55)`);
   glow.addColorStop(0.55, `hsla(${hue + 25}, 90%, 55%, 0.16)`);
@@ -544,14 +633,23 @@ function drawOrb() {
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, w, h);
 
-  // core
+  // core with specular highlight
   const core = ctx.createRadialGradient(cx - 18, cy - 22, 8, cx, cy, 86 * breathe);
-  core.addColorStop(0, "#e0faff");
+  core.addColorStop(0, "#eefaff");
   core.addColorStop(0.28, `hsla(${hue}, 92%, 62%, 0.95)`);
-  core.addColorStop(1, `hsla(${hue + 40}, 85%, 30%, 0.9)`);
+  core.addColorStop(1, `hsla(${hue + 40}, 85%, 28%, 0.92)`);
   ctx.beginPath();
   ctx.arc(cx, cy, 86 * breathe, 0, Math.PI * 2);
   ctx.fillStyle = core;
+  ctx.fill();
+
+  // inner shimmer
+  const shimmer = ctx.createRadialGradient(cx - 30, cy - 34, 4, cx - 20, cy - 26, 60);
+  shimmer.addColorStop(0, "rgba(255,255,255,0.55)");
+  shimmer.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.beginPath();
+  ctx.arc(cx - 16, cy - 20, 52, 0, Math.PI * 2);
+  ctx.fillStyle = shimmer;
   ctx.fill();
 
   // orbiting rings
@@ -579,7 +677,7 @@ function drawOrb() {
     ctx.fill();
   }
 
-  requestAnimationFrame(drawOrb);
+  if (!reduceMotion) requestAnimationFrame(drawOrb);
 }
 drawOrb();
 
