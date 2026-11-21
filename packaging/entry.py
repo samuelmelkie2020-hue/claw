@@ -278,6 +278,25 @@ def main() -> int:
     except Exception:
         _write("prune: skipped")
 
+    # A "window proof" run: used by CI to prove a real window opens on each OS.
+    # It is a normal launch, with a watchdog so a runner cannot hang, and the exit
+    # code says whether a window was ever created.
+    if "--window-proof" in sys.argv:
+        watch = float(os.environ.get("AEGIS_WINDOW_PROOF_SECONDS", "25"))
+
+        def _watchdog() -> None:
+            try:
+                time.sleep(watch)
+            finally:
+                _write(f"window-proof: giving up after {watch:.0f}s")
+                os._exit(3)  # no window, and no clean shutdown to wait for
+
+        import threading
+        import time
+
+        threading.Thread(target=_watchdog, name="aegis-window-proof", daemon=True).start()
+        _write(f"window-proof: launching the real window (watchdog {watch:.0f}s)")
+
     try:
         _write("app:      handing over to run.py")
         _write("app:      importing the server and opening the window")

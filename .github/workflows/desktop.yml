@@ -125,6 +125,137 @@ jobs:
             throw 'Binary ran from source instead of the frozen bundle'
           }
 
+      # The one thing no unit test can prove: that a real window opens on a real
+      # desktop. Runs the packaged binary as a normal user would, with a watchdog,
+      # and requires the app itself to say WINDOW CREATED. A screenshot is kept as
+      # evidence for the OS where grabbing one is trivial.
+      - name: Prove a real window opens (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 5
+        env:
+          AEGIS_WINDOW_PROOF: "1"
+          AEGIS_WINDOW_PROOF_SECONDS: "8"
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $log = Join-Path $env:APPDATA 'Aegis\aegis-startup.log'
+          Remove-Item $log -ErrorAction SilentlyContinue
+          $created = $false
+          try {
+            $p = Start-Process -FilePath dist\Aegis.exe -ArgumentList '--window-proof' -PassThru
+            # The claim is "a window was created", which the app records itself.
+            # The process is then stopped: how a GUI app ends is not part of it.
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Seconds 2
+              if ($p.HasExited) { Write-Host "process exited early: $($p.ExitCode)"; break }
+              if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'WINDOW CREATED' -Quiet)) {
+                $created = $true
+                break
+              }
+            }
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          } catch { Write-Host "launch failed: $_" }
+          if (Test-Path $log) { Get-Content $log -Tail 25; Copy-Item $log artifacts\windows-startup.log }
+          else { Write-Host 'no startup log written' }
+          $crash = Join-Path $env:APPDATA 'Aegis\aegis-crash.log'
+          if (Test-Path $crash) { Get-Content $crash -Tail 25; Copy-Item $crash artifacts\windows-crash.log }
+          $reason = ''
+          if (Test-Path $log) {
+            $hit = Select-String -Path $log -Pattern 'window FAILED|FAILED to start|could not be created' | Select-Object -Last 1
+            if ($hit) { $reason = $hit.Line.Trim() }
+          }
+          Write-Host "window created: $created"
+          Write-Host "reason: $reason"
+          try {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("$PWD\artifacts\windows-desktop.png")
+            Write-Host 'screenshot saved'
+          } catch { Write-Host "screenshot skipped: $_" }
+          if (-not $created) {
+            Write-Host "::error title=window-proof::no window created :: $reason"
+            exit 1
+          }
+
+      - name: Prove a real window opens (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        env:
+          AEGIS_WINDOW_PROOF: "1"
+          AEGIS_WINDOW_PROOF_SECONDS: "8"
+        run: |
+          mkdir -p artifacts
+          LOG="$HOME/.config/Aegis/aegis-startup.log"
+          rm -f "$LOG"
+          xvfb-run -a ./dist/Aegis --window-proof &
+          pid=$!
+          created=no
+          for i in $(seq 1 60); do
+            sleep 2
+            if ! kill -0 "$pid" 2>/dev/null; then echo "process exited early"; break; fi
+            if grep -q "WINDOW CREATED" "$LOG" 2>/dev/null; then created=yes; break; fi
+          done
+          kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+          if [ -f "$LOG" ]; then tail -25 "$LOG"; cp "$LOG" artifacts/linux-startup.log
+          else echo "no startup log written"; fi
+          CRASH="$HOME/.config/Aegis/aegis-crash.log"
+          [ -f "$CRASH" ] && { tail -25 "$CRASH"; cp "$CRASH" artifacts/linux-crash.log; }
+          reason=$(grep -E "window FAILED|FAILED to start|could not be created" "$LOG" 2>/dev/null | tail -1 | tr -d '\r' | cut -c1-300)
+          echo "window created: $created"
+          echo "reason: $reason"
+          if [ "$created" != yes ]; then
+            # Reported loudly but not blocking: the Linux bundle is a convenience
+            # build whose backend is a system GTK that the runner may not expose to
+            # a frozen app. Windows and macOS — what people actually download — are
+            # asserted strictly. The annotation keeps this from rotting unseen.
+            echo "::warning title=window-proof (Linux)::no window created :: $reason"
+          fi
+
+      - name: Prove a real window opens (macOS)
+        if: runner.os == 'macOS'
+        timeout-minutes: 5
+        env:
+          AEGIS_WINDOW_PROOF: "1"
+          AEGIS_WINDOW_PROOF_SECONDS: "8"
+        run: |
+          mkdir -p artifacts
+          # A runner session has a window server, but not always an activated one;
+          # the app creates its window either way, which is what is asserted.
+          LOG="$HOME/Library/Application Support/Aegis/aegis-startup.log"
+          rm -f "$LOG"
+          ./dist/Aegis.app/Contents/MacOS/Aegis --window-proof &
+          pid=$!
+          created=no
+          for i in $(seq 1 60); do
+            sleep 2
+            if ! kill -0 "$pid" 2>/dev/null; then echo "process exited early"; break; fi
+            if grep -q "WINDOW CREATED" "$LOG" 2>/dev/null; then created=yes; break; fi
+          done
+          kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true
+          if [ -f "$LOG" ]; then tail -25 "$LOG"; cp "$LOG" artifacts/macos-startup.log
+          else echo "no startup log written"; fi
+          CRASH="$HOME/Library/Application Support/Aegis/aegis-crash.log"
+          [ -f "$CRASH" ] && { tail -25 "$CRASH"; cp "$CRASH" artifacts/macos-crash.log; }
+          screencapture -x artifacts/macos-desktop.png || true
+          reason=$(grep -E "window FAILED|FAILED to start|could not be created" "$LOG" 2>/dev/null | tail -1 | tr -d '\r' | cut -c1-300)
+          echo "window created: $created"
+          echo "reason: $reason"
+          if [ "$created" != yes ]; then
+            echo "::error title=window-proof::no window created :: $reason"
+            exit 1
+          fi
+
+      - name: Upload window-proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-proof-${{ matrix.artifact }}
+          path: artifacts
+          if-no-files-found: warn
+
       - name: Upload self-check report
         if: always()
         uses: actions/upload-artifact@v4

@@ -51,7 +51,7 @@ def run_web(host: str, port: int, open_browser: bool) -> int:
     from aegis.server import app
 
     print()
-    print("  🛡 Aegis — your Aegis is awake")
+    print("  Aegis is awake")
     print(f"  →  open {unlock_url(port, host)}")
     print(f"     {describe_exposure(host)}")
     if host not in {"127.0.0.1", "localhost", "::1"}:
@@ -120,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="verify this build can start, without opening a window (used by CI)",
     )
+    # Used by CI to prove a real window opens: a normal launch, but the app closes
+    # itself after a moment and the exit code says whether a window existed.
+    # Hidden, because it is an assertion tool rather than something a user runs.
+    parser.add_argument("--window-proof", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--diagnose",
         action="store_true",
@@ -128,6 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     port = args.port if args.port is not None else int(os.environ.get("AEGIS_PORT", "8000"))
+
+    if args.window_proof:
+        # The desktop shell reads these; setting them here means the flag alone is
+        # enough (CI does not have to remember two things).
+        os.environ.setdefault("AEGIS_WINDOW_PROOF", "1")
+        os.environ.setdefault("AEGIS_WINDOW_PROOF_SECONDS", "8")
 
     if args.self_check:
         from aegis.desktop import self_check

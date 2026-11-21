@@ -1,0 +1,8 @@
+Aegis opened in your web browser instead of its own window.
+
+Reason: The desktop window could not be created. This is almost always a missing WebView2 runtime on Windows, or a missing WebKitGTK on Linux — see the startup log for the backend's own message.
+
+Everything works exactly the same there. This tab is the app.
+
+Open this address:
+http://127.0.0.1:8000/?token=2QiYdQaXTDhHzeVkch8qdeNAsf1Zgzcf5ZCXULX_CmY

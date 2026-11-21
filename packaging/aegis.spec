@@ -34,7 +34,58 @@ else:
     _icon_file = ASSETS / "aegis.png"
 icon = str(_icon_file) if _icon_file.exists() else None
 
-datas = [
+# ---------------------------------------------------------------------------
+# GTK typelibs for the Linux window
+#
+# pywebview's Linux backend needs Gtk + WebKit2 through GI, and GI typelibs are
+# *data*: PyInstaller cannot find them by following imports. On a bare runner
+# (xvfb, no pip install at run time) they must be inside the bundle, or the window
+# can never be created — "You must have either QT or GTK with Python extensions".
+# This used to run before `hiddenimports` existed and raised NameError, which is
+# why the collection silently did nothing.
+# ---------------------------------------------------------------------------
+def _gi_datas() -> list:
+    if not sys.platform.startswith("linux"):
+        return []
+    wanted = ("Gtk-3.0", "Gdk-3.0", "WebKit2-4.1", "WebKit2-4.0", "Gio-2.0", "GLib-2.0", "GObject-2.0")
+    hooks = []
+    try:
+        from PyInstaller.utils import hooks as _hooks
+
+        for name in ("collect_typelib_data", "collect_gi_typelibs"):
+            collector = getattr(_hooks, name, None)
+            if collector is not None:
+                hooks.append(collector)
+    except Exception:
+        pass
+    for collector in hooks:
+        try:
+            found = []
+            for typelib in wanted:
+                try:
+                    found.extend(collector(typelib))
+                except Exception:
+                    continue
+            if found:
+                print(f"[aegis] typelibs collected via {collector.__name__}: {len(found)}")
+                return found
+        except Exception:
+            continue
+    # Last resort: copy the typelib files straight out of the standard location.
+    found = []
+    for pattern in ("/usr/lib/*/girepository-1.0", "/usr/lib/girepository-1.0"):
+        for directory in Path("/").glob(pattern.lstrip("/")):
+            for path in directory.glob("*.typelib"):
+                if path.stem in wanted:
+                    found.append((str(path), "gi_typelibs"))
+    if found:
+        print(f"[aegis] typelibs copied from disk: {len(found)}")
+    return found
+
+
+_typelibs = _gi_datas()
+
+datas = list(_typelibs) + [
     (str(ROOT / "aegis" / "static"), "aegis/static"),  # includes aegis.png (window icon)
     # The bootstrap locates the real entry point at runtime. Carrying it as data
     # is what makes --self-check and --diagnose work in the *frozen* build,
@@ -64,7 +115,19 @@ if sys.platform.startswith("win"):
 elif sys.platform == "darwin":
     hiddenimports += ["webview.platforms.cocoa"]
 else:
-    hiddenimports += ["webview.platforms.gtk", "webview.platforms.qt"]
+    # The frozen binary is run on a bare runner (xvfb, no pip install), so GTK and
+    # its GI typelib have to be *inside* the bundle. Without them the window can
+    # never be created: "You must have either QT or GTK with Python extensions".
+    hiddenimports += [
+        "webview.platforms.gtk",
+        "webview.platforms.qt",
+        "gi",
+        "gi.repository",
+        "gi.repository.Gtk",
+        "gi.repository.Gdk",
+        "gi.repository.GLib",
+        "gi.repository.Gio",
+    ]
 
 excludes = [
     "tkinter",          # pywebview may probe Tk; we never use it

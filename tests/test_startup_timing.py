@@ -342,3 +342,55 @@ def test_diagnose_never_leaks_the_key_or_token(tmp_path, monkeypatch, capsys):
 
 def _fake_hardware():
     return local_llm.Hardware(system="Test", machine="x", cpu="c", cores=4, ram_gb=8.0)
+
+
+# ---------------------------------------------------------------------------
+# The browser fallback: no native window is never a dead end
+# ---------------------------------------------------------------------------
+
+def test_a_window_proof_run_exits_zero_only_when_a_window_existed(monkeypatch, tmp_path):
+    """CI asserts on this exit code, so it must not be able to lie."""
+    import sys as _sys
+    import types as _types
+
+    from aegis import config
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setenv("AEGIS_WINDOW_PROOF", "1")
+
+    module = _types.ModuleType("webview")
+    menu = _types.ModuleType("webview.menu")
+    menu.Menu = type("Menu", (), {"__init__": lambda s, t, i: None})
+    menu.MenuAction = type("MenuAction", (), {"__init__": lambda s, t, f: None})
+    menu.MenuSeparator = lambda: object()
+
+    class Window:
+        def load_url(self, url):
+            pass
+
+        def expose(self, *f):
+            pass
+
+        def destroy(self):
+            pass
+
+    module.menu = menu
+    module.create_window = lambda **kw: Window()
+    monkeypatch.setitem(_sys.modules, "webview", module)
+    monkeypatch.setitem(_sys.modules, "webview.menu", menu)
+    monkeypatch.setattr(desktop, "_adopt_local_model", lambda **k: None)
+
+    # A working window -> 0
+    module.start = lambda **kw: None
+    assert desktop.run_desktop(port=0) == 0
+    assert "WINDOW CREATED" in (tmp_path / "aegis-startup.log").read_text(encoding="utf-8")
+
+    # A window that never materialises -> non-zero, even though the app fell back
+    def no_window(**kw):
+        raise RuntimeError("backend refused")
+
+    module.start = no_window
+    opened: list[str] = []
+    monkeypatch.setattr(desktop, "_open_in_browser", lambda url: opened.append(url) or True)
+    assert desktop.run_desktop(port=0) == 4
+    assert opened, "the user must still end up with a working app"

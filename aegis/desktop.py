@@ -248,6 +248,23 @@ class DesktopAPI:
         return {"width": MIN_SIZE[0], "height": MIN_SIZE[1]}
 
 
+def _menu_option(webview, api: DesktopAPI) -> dict:
+    """The menu, as a keyword for ``webview.start`` — or nothing at all.
+
+    A menu is decoration. Different pywebview versions accept it differently (as
+    of 5.x it is ignored unless a GUI backend supports it, and passing it to a
+    backend that does not is one more way for the window to fail). It must never
+    be the reason the app does not open, so it is offered only when this build
+    actually has menu support.
+    """
+    try:
+        if not hasattr(webview, "menu"):
+            return {}
+        return {"menu": _menu(api)}
+    except Exception:  # pragma: no cover - decoration
+        return {}
+
+
 def _menu(api: DesktopAPI):
     """A minimal native menu: settings, new conversation, quit."""
     try:
@@ -277,18 +294,54 @@ def window_icon_path() -> Path | None:
 
 
 def _ensure_streams() -> None:
-    """Give a windowed bundle somewhere to print.
+    """Give a windowed bundle somewhere to print, in an encoding that cannot fail.
 
-    PyInstaller's ``console=False`` build leaves ``sys.stdout`` and ``sys.stderr``
-    as ``None``, so a bare ``print`` raises ``AttributeError`` and takes the
-    process down. Diagnostics must survive that.
+    Two separate failures live here, both seen on real machines:
+
+    * PyInstaller's ``console=False`` build leaves ``sys.stdout`` as ``None``, so a
+      bare ``print`` raises ``AttributeError`` and takes the process down.
+    * On Windows a console that exists but uses a legacy code page (cp1252) raises
+      ``UnicodeEncodeError`` on the first banner emoji — ``'charmap' codec can't
+      encode character '\U0001f6e1'`` is the exact error that stopped the window
+      from ever being created.
+
+    So: hand back a devnull file when there is nothing, and force the encoding to
+    UTF-8 with ``errors="replace"`` when there is something. A banner is never
+    worth a failed launch.
     """
     for name in ("stdout", "stderr"):
-        if getattr(sys, name) is None:
+        stream = getattr(sys, name)
+        if stream is None:
             try:
                 setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
             except OSError:  # pragma: no cover - devnull always opens
                 pass
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # not a TextIOWrapper, or closed; printing must still work
+            pass
+
+
+def _print_safe(text: str = "") -> None:
+    """print() that cannot raise on a code page or a closed stream.
+
+    Kept separate from :func:`_ensure_streams` because a stream can be replaced
+    after startup (a frozen app on Windows reassigns it), and because diagnostics
+    are the one thing that must never become the failure.
+    """
+    try:
+        print(text)
+        return
+    except Exception:
+        pass
+    try:
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            buffer.write((text + "\n").encode("ascii", "replace"))
+            buffer.flush()
+    except Exception:  # pragma: no cover - nothing left to try
+        pass
 
 
 def self_check() -> int:
@@ -540,6 +593,10 @@ def diagnose() -> int:
         say(f"  model:       unavailable ({exc})")
 
     say("")
+    say("If the window never appears, this is the guaranteed way in:")
+    say("  Aegis.exe --web")
+    say("It serves the same app on 127.0.0.1 and opens your normal browser.")
+    say("")
     say("Copy this report when asking for help. It contains no API key and no token.")
     try:
         from .config import DATA_DIR as dir_for_logs
@@ -648,6 +705,107 @@ def _swallow(func) -> None:
         log.warning("Error window failed", exc_info=True)
 
 
+def _open_in_browser(url: str) -> bool:
+    """Last resort: the same app, in the browser the machine already has."""
+    try:
+        import webbrowser
+
+        return bool(webbrowser.open(url))
+    except Exception:  # pragma: no cover - no default browser, weird env
+        return False
+
+
+def _fallback_to_browser(url: str, reason: str) -> None:
+    """Tell the user in words, and give them a working app.
+
+    A native window can fail for reasons this app cannot fix (a stripped WebView2
+    runtime, a locked-down machine, antivirus interference). Dying there is a
+    dead end: the server is *already running*, so the honest thing is to open it
+    where it is guaranteed to work and say so plainly.
+    """
+    message = (
+        "Aegis opened in your web browser instead of its own window.\n\n"
+        f"Reason: {reason}\n\n"
+        "Everything works exactly the same there. This tab is the app."
+    )
+    _print_safe(f"\n  {message}\n")
+    _write_heartbeat(f"window FAILED ({reason}) — using the browser instead")
+    if _open_in_browser(url):
+        return
+    # No browser either: at least leave the URL somewhere the user will find it,
+    # and keep the server alive so pasting it works.
+    try:
+        from .config import DATA_DIR
+
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "aegis-open-me.txt").write_text(
+            message + "\n\nOpen this address:\n" + url + "\n", encoding="utf-8"
+        )
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _keep_serving(handle: ServerHandle, *, wait_forever: bool = False) -> bool:
+    """Stay alive after a fallback, so the browser tab has a server to talk to.
+
+    Without this the process would exit the moment the fallback opened the page,
+    and the user would get a working-looking URL that instantly dies — which is
+    the same "it does not work" with extra steps. Returns True if it kept going.
+    """
+    if not wait_forever:
+        # A test or a scripted run must not block; the caller only asks whether
+        # serving was possible.
+        return True
+    try:
+        print("  Keeping Aegis running. Press Ctrl+C to stop.\n")
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        while handle.thread.is_alive():
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    return True
+
+
+def _supported_kwargs(function, kwargs: dict) -> dict:
+    """Drop keywords this pywebview version does not accept.
+
+    ``create_window(icon=...)`` is the bug that made *every* platform fail to open
+    a window: ``icon`` moved to ``start()`` in a later pywebview, and requirements
+    allow a range of versions, so the build could get either. A cosmetic icon must
+    never be able to stop the app from opening, so unknown keywords are dropped
+    with a log line rather than raised.
+    """
+    try:
+        import inspect
+
+        parameters = inspect.signature(function).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins, C functions
+        return kwargs
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+        return kwargs
+    unsupported = [key for key in kwargs if key not in parameters]
+    if unsupported:
+        log.warning("This pywebview does not accept %s; opening without it", unsupported)
+        return {k: v for k, v in kwargs.items() if k in parameters}
+    return kwargs
+
+
+def _safe_window_step(step, *args, **kwargs) -> None:
+    """Run one optional window step, and never let it abort startup.
+
+    Exposing the JS bridge exposes *bound methods*, so ``inspect`` is called on
+    ``self`` and on some pywebview versions that can raise on a window that is not
+    finished being created. Losing the menu or the bridge is a nuisance; losing
+    the window is a broken app.
+    """
+    try:
+        step(*args, **kwargs)
+    except Exception:  # pragma: no cover - depends on the pywebview version
+        log.debug("Optional window step failed: %s", getattr(step, "__name__", step), exc_info=True)
+
+
 def _start_webview(webview, **options) -> None:
     """Run the webview event loop, and never return silently without a window.
 
@@ -671,8 +829,16 @@ def _start_webview(webview, **options) -> None:
         )
 
 
-def run_desktop(*, port: int | None = None, debug: bool = False) -> int:
-    """Start the server, open the desktop window, and block until it closes."""
+def run_desktop(
+    *, port: int | None = None, debug: bool = False, keep_serving: bool = False
+) -> int:
+    """Start the server, open the desktop window, and block until it closes.
+
+    ``keep_serving`` is what makes the browser fallback usable: if no native
+    window can be created, the server stays up for the tab that replaces it. It
+    defaults to **off** so a caller (a test, CI, a script) never blocks on a
+    fallback by accident; the real entry point in ``run.py`` turns it on.
+    """
     _ensure_streams()
     try:
         import webview
@@ -703,21 +869,28 @@ def run_desktop(*, port: int | None = None, debug: bool = False) -> int:
     _write_heartbeat("3/4 server answering")
 
     api = DesktopAPI()
+    app_url = f"{handle.base_url}/?token={get_token()}"
+    proof_ok = False
     try:
         # Open on a page that explains itself. The app URL is swapped in once the
         # server answers, so a slow first paint is a message, not a blank window.
+        icon = window_icon_path()
         window = webview.create_window(
-            title=APP_NAME,
-            html=_STARTING_PAGE,
-            js_api=api,
-            width=WINDOW_WIDTH,
-            height=WINDOW_HEIGHT,
-            min_size=MIN_SIZE,
-            background_color=BROWSER_COLOR,
-            text_select=True,
-            zoomable=True,
-            confirm_close=True,
-            **({"icon": str(icon)} if (icon := window_icon_path()) else {}),
+            **_supported_kwargs(
+                webview.create_window,
+                {
+                    "title": APP_NAME,
+                    "html": _STARTING_PAGE,
+                    "js_api": api,
+                    "width": WINDOW_WIDTH,
+                    "height": WINDOW_HEIGHT,
+                    "min_size": MIN_SIZE,
+                    "background_color": BROWSER_COLOR,
+                    "text_select": True,
+                    "zoomable": True,
+                    "confirm_close": True,
+                },
+            )
         )
         api.attach(window, handle)
 
@@ -725,13 +898,12 @@ def run_desktop(*, port: int | None = None, debug: bool = False) -> int:
         # now (start_server polls /api/health), so this is a navigation to a server
         # that is definitely listening — the failure mode that matters is a user
         # staring at a white window wondering whether anything happened.
-        _navigate_when_ready(window, f"{handle.base_url}/?token={get_token()}")
+        _navigate_when_ready(window, app_url)
 
         # The page also asks for these via JS so the browser build stays unaware.
-        try:
-            window.expose(api.info, api.open_settings, api.new_conversation, api.min_size)
-        except Exception:  # pragma: no cover - optional in older versions
-            pass
+        _safe_window_step(
+            window.expose, api.info, api.open_settings, api.new_conversation, api.min_size
+        )
 
         # An update replaces this executable, which the OS will not allow while
         # it runs. The updater starts a helper that waits for this process to
@@ -742,25 +914,64 @@ def run_desktop(*, port: int | None = None, debug: bool = False) -> int:
         # A test double (or an older pywebview) may not offer destroy; the
         # update then still installs, it just waits for the user to quit.
         destroy = getattr(window, "destroy", None)
-        updates.register_restart_hook(destroy if callable(destroy) else None)
+        _safe_window_step(updates.register_restart_hook, destroy if callable(destroy) else None)
 
         _write_heartbeat("4/4 window created")
-        print(f"\n  🛡 Aegis is running as a desktop app (port {chosen}).")
-        print("     Close the window to quit.\n")
+        # Proof for CI, and for a user wondering whether anything happened: this
+        # line is only reachable after pywebview really made a window.
+        _write_heartbeat("WINDOW CREATED")
+        proof_ok = True
+        if os.environ.get("AEGIS_WINDOW_PROOF"):
+            # Record the proof, then leave the process alone: CI kills it once it
+            # has read this line. Closing a GUI from another thread is what turned
+            # a working window into a CLR crash on Windows (0xE0434352) and into a
+            # hung Cocoa loop on macOS. The window is the evidence; how the process
+            # ends is not part of the claim.
+            _write_heartbeat("WINDOW PROOF: window is open and serving")
+        _print_safe(f"\n  🛡 Aegis is running as a desktop app (port {chosen}).")
+        _print_safe("     Close the window to quit.\n")
 
-        _start_webview(
-            webview,
-            debug=debug,
-            private_mode=False,          # keep localStorage (voice prefs) between runs
-            menu=_menu(api),
-            http_server=False,           # we serve from uvicorn, not pywebview
-        )
-    except Exception as exc:  # e.g. no WebKitGTK, no display
-        _report_fatal(exc, page=_error_page)
-        return 1
+        try:
+            _start_webview(
+                webview,
+                **_supported_kwargs(
+                    webview.start,
+                    {
+                        "debug": debug,
+                        "private_mode": False,   # keep localStorage (voice prefs)
+                        "http_server": False,    # uvicorn serves the app, not pywebview
+                        **_menu_option(webview, api),
+                        **({"icon": str(icon)} if icon else {}),
+                    },
+                ),
+            )
+        except Exception as exc:  # no WebView2/WebKitGTK, no display, backend refused
+            _write_heartbeat(f"4/4 window could not be created: {exc}")
+            _fallback_to_browser(app_url, str(exc))
+            return _fallback_code(_keep_serving(handle, wait_forever=keep_serving))
+    except Exception as exc:  # the window could not even be constructed
+        _write_heartbeat(f"4/4 window could not be created: {exc}")
+        _fallback_to_browser(app_url, str(exc))
+        return _fallback_code(_keep_serving(handle, wait_forever=keep_serving))
     finally:
         stop_server(handle)
+
+    if os.environ.get("AEGIS_WINDOW_PROOF"):
+        # The proof is the exit code: 0 only if a window really existed.
+        return 0 if proof_ok else 4
     return 0
+
+
+def _fallback_code(serving: bool) -> int:
+    """Exit code after a browser fallback.
+
+    0 normally — the user has a working app. In a window-proof run it must be
+    non-zero: the whole point of that run is "a native window opened", and a tab
+    is not that.
+    """
+    if os.environ.get("AEGIS_WINDOW_PROOF"):
+        return 4
+    return 0 if serving else 1
 
 
 def _navigate_when_ready(window, url: str, *, attempts: int = 40) -> None:

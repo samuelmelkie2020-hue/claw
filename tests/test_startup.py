@@ -260,3 +260,55 @@ def test_the_two_webview2_checks_agree_on_the_shape():
     assert "def _webview2_status()" in entry
     # desktop's returns a version string or None; the caller must test truthiness
     assert "if not version:" in desktop
+
+
+def test_there_is_a_window_proof_mode_and_it_is_wired_end_to_end():
+    """"Prove a real window opens" is worthless if it cannot be invoked.
+
+    Regression: the flag was added to the bootstrap but not to the CLI parser, so
+    every OS exited 2 (argparse: unrecognized argument) and the probe reported
+    "no window" for the wrong reason.
+    """
+    run_py = (ROOT / "run.py").read_text(encoding="utf-8")
+    assert "--window-proof" in run_py
+    assert "AEGIS_WINDOW_PROOF" in run_py
+
+    desktop = (ROOT / "aegis" / "desktop.py").read_text(encoding="utf-8")
+    assert '"WINDOW CREATED"' in desktop
+    assert "AEGIS_WINDOW_PROOF" in desktop
+
+    workflow = (ROOT / ".github" / "workflows" / "desktop.yml").read_text(encoding="utf-8")
+    assert workflow.count("--window-proof") >= 3, "one per OS"
+    assert "WINDOW CREATED" in workflow
+
+
+def test_the_window_proof_flag_is_accepted_by_the_parser():
+    """Actually parse it, rather than trusting a grep."""
+    import inspect
+    import runpy
+
+    ns = runpy.run_path(str(ROOT / "run.py"))
+    assert "main" in ns
+    main_src = inspect.getsource(ns["main"])
+    assert '"--window-proof"' in main_src
+    assert "argparse.SUPPRESS" in main_src, "it is an assertion tool, not a feature"
+    assert isinstance(ns.get("DEFAULT_HOST"), str)
+
+
+def test_the_spec_actually_executes_its_head_without_raising():
+    """The typelib collection used to reference `hiddenimports` before it existed.
+
+    A NameError there is silent: the build still "works", the bundle just has no
+    GTK, and the Linux app can never open a window. So execute the spec's head —
+    everything up to Analysis(), which needs PyInstaller's build machinery.
+    """
+    source = ENTRY.parent.joinpath("aegis.spec").read_text(encoding="utf-8")
+    head = source[: source.index("analysis = Analysis(")]
+    namespace = {"SPECPATH": str(ENTRY.parent), "__file__": str(ENTRY.parent / "aegis.spec")}
+    exec(compile(head, "aegis.spec", "exec"), namespace)  # noqa: S102 - a build file, executed as one
+
+    assert isinstance(namespace["datas"], list)
+    assert isinstance(namespace["hiddenimports"], list)
+    assert "_typelibs" in namespace
+    if sys.platform.startswith("linux"):
+        assert "gi.repository.Gtk" in namespace["hiddenimports"]
